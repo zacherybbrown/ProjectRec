@@ -10,6 +10,7 @@ Project Rec is a social room transport experience built in Rust. It is designed 
 - Load asset metadata from `assets/manifest.json`
 - Enforce room creation only when PCVR mode is enabled
 - Add cubes and edit the 3D world from the GUI editor mode
+- Editor now includes an object list, transform tools, duplicate/delete actions, and a default 3D avatar in the scene
 
 ## Getting started
 
