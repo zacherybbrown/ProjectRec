@@ -23,10 +23,11 @@ pub fn run_gui() -> Result<()> {
 enum AppMode {
     Menu,
     Game,
+    Editor,
 }
 
 struct GameState {
-    position: egui::Pos2,
+    position: [f32; 3],
     velocity_y: f32,
     yaw: f32,
     pitch: f32,
@@ -36,7 +37,7 @@ struct GameState {
 impl GameState {
     fn new() -> Self {
         Self {
-            position: egui::pos2(0.0, 0.0),
+            position: [0.0, 1.5, -4.0],
             velocity_y: 0.0,
             yaw: 0.0,
             pitch: 0.0,
@@ -45,9 +46,40 @@ impl GameState {
     }
 }
 
+#[derive(Clone)]
+struct Cube {
+    position: [f32; 3],
+    size: f32,
+    color: egui::Color32,
+}
+
+impl Cube {
+    fn new(position: [f32; 3], size: f32, color: egui::Color32) -> Self {
+        Self { position, size, color }
+    }
+}
+
+struct EditorState {
+    cursor: [i32; 3],
+    size: f32,
+    action_message: String,
+}
+
+impl EditorState {
+    fn new() -> Self {
+        Self {
+            cursor: [0, 0, 5],
+            size: 2.0,
+            action_message: "Editor ready.".to_string(),
+        }
+    }
+}
+
 struct ProjectRecApp {
     mode: AppMode,
     game: GameState,
+    editor: EditorState,
+    world: Vec<Cube>,
     host_name: String,
     host_port: String,
     host_public: bool,
@@ -65,6 +97,10 @@ impl ProjectRecApp {
     fn new() -> Self {
         let (tx, rx) = mpsc::channel();
         let mut app = Self {
+            mode: AppMode::Menu,
+            game: GameState::new(),
+            editor: EditorState::new(),
+            world: vec![Cube::new([0.0, 0.0, 8.0], 2.5, egui::Color32::from_rgb(120, 180, 255))],
             host_name: String::from("Lounge"),
             host_port: String::from("4000"),
             host_public: true,
@@ -73,8 +109,6 @@ impl ProjectRecApp {
             join_address: String::from("127.0.0.1:4000"),
             join_name: String::from("Player"),
             status: String::from("Ready."),
-            mode: AppMode::Menu,
-            game: GameState::new(),
             room_list: Vec::new(),
             tx,
             rx,
@@ -202,9 +236,13 @@ impl eframe::App for ProjectRecApp {
                         ui.label(room_text);
                     }
                     ui.separator();
-                    if ui.button("Start Game").clicked() {
+                            if ui.button("Start Game").clicked() {
                         self.mode = AppMode::Game;
                         self.status = "Game started. WASD move, SPACE jump, mouse look.".to_string();
+                    }
+                    if ui.button("Editor Mode").clicked() {
+                        self.mode = AppMode::Editor;
+                        self.status = "Editor started. Place cubes into the world.".to_string();
                     }
                     ui.separator();
                     ui.label("Status:");
@@ -214,11 +252,109 @@ impl eframe::App for ProjectRecApp {
             AppMode::Game => {
                 self.update_game(ctx, frame);
             }
+            AppMode::Editor => {
+                self.update_editor(ctx, frame);
+            }
         }
     }
 }
 
 impl ProjectRecApp {
+    fn project_point(&self, point: [f32; 3], center: egui::Pos2, scale: f32) -> Option<(egui::Pos2, f32)> {
+        let dx = point[0] - self.game.position[0];
+        let dy = point[1] - self.game.position[1];
+        let dz = point[2] - self.game.position[2];
+        let yaw = self.game.yaw;
+        let pitch = self.game.pitch;
+
+        let cos_y = yaw.cos();
+        let sin_y = yaw.sin();
+        let x = dx * cos_y + dz * sin_y;
+        let z = -dx * sin_y + dz * cos_y;
+
+        let cos_p = pitch.cos();
+        let sin_p = pitch.sin();
+        let y = dy * cos_p - z * sin_p;
+        let z = dy * sin_p + z * cos_p;
+
+        if z <= 0.1 {
+            return None;
+        }
+
+        let px = center.x + x / z * scale;
+        let py = center.y - y / z * scale;
+        Some((egui::pos2(px, py), z))
+    }
+
+    fn draw_cube(&self, painter: &egui::Painter, cube: &Cube, center: egui::Pos2, scale: f32) {
+        let half = cube.size * 0.5;
+        let corners = [
+            [cube.position[0] - half, cube.position[1] - half, cube.position[2] - half],
+            [cube.position[0] + half, cube.position[1] - half, cube.position[2] - half],
+            [cube.position[0] + half, cube.position[1] + half, cube.position[2] - half],
+            [cube.position[0] - half, cube.position[1] + half, cube.position[2] - half],
+            [cube.position[0] - half, cube.position[1] - half, cube.position[2] + half],
+            [cube.position[0] + half, cube.position[1] - half, cube.position[2] + half],
+            [cube.position[0] + half, cube.position[1] + half, cube.position[2] + half],
+            [cube.position[0] - half, cube.position[1] + half, cube.position[2] + half],
+        ];
+
+        let projected: Vec<Option<(egui::Pos2, f32)>> = corners
+            .iter()
+            .map(|point| self.project_point(*point, center, scale))
+            .collect();
+        if projected.iter().any(|entry| entry.is_none()) {
+            return;
+        }
+
+        let pts: Vec<egui::Pos2> = projected.iter().map(|entry| entry.unwrap().0).collect();
+        let face_order = [
+            ([0, 1, 2, 3], 0.85),
+            ([1, 5, 6, 2], 0.75),
+            ([3, 2, 6, 7], 0.95),
+        ];
+
+        for (indices, brightness) in face_order {
+            let polygon: Vec<egui::Pos2> = indices.iter().map(|&i| pts[i]).collect();
+            painter.add(egui::Shape::convex_polygon(
+                polygon,
+                egui::Color32::from_rgb(
+                    (cube.color.r() as f32 * brightness) as u8,
+                    (cube.color.g() as f32 * brightness) as u8,
+                    (cube.color.b() as f32 * brightness) as u8,
+                ),
+                egui::Stroke::new(1.5, egui::Color32::BLACK),
+            ));
+        }
+    }
+
+    fn draw_world(&self, painter: &egui::Painter, center: egui::Pos2, rect: egui::Rect) {
+        let ground_color = egui::Color32::from_rgb(40, 60, 80);
+        let sky_color = egui::Color32::from_rgb(10, 25, 60);
+        painter.rect_filled(rect, 0.0, sky_color);
+        let horizon = egui::Rect::from_min_max(
+            egui::pos2(rect.left(), center.y),
+            egui::pos2(rect.right(), rect.bottom()),
+        );
+        painter.rect_filled(horizon, 0.0, ground_color);
+
+        let mut ordered_cubes = self.world.clone();
+        ordered_cubes.sort_by(|a, b| {
+            let da = ((a.position[0] - self.game.position[0]).powi(2)
+                + (a.position[1] - self.game.position[1]).powi(2)
+                + (a.position[2] - self.game.position[2]).powi(2))
+            .partial_cmp(&((b.position[0] - self.game.position[0]).powi(2)
+                + (b.position[1] - self.game.position[1]).powi(2)
+                + (b.position[2] - self.game.position[2]).powi(2)))
+            .unwrap_or(std::cmp::Ordering::Equal);
+            da
+        });
+
+        for cube in &ordered_cubes {
+            self.draw_cube(painter, cube, center, 360.0);
+        }
+    }
+
     fn update_game(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let dt = 1.0 / 60.0;
         let (w_pressed, s_pressed, a_pressed, d_pressed, jump_pressed, pointer_delta) = ctx.input(|input| {
@@ -252,34 +388,29 @@ impl ProjectRecApp {
         self.game.yaw += pointer_delta.x * 0.002;
         self.game.pitch = (self.game.pitch + pointer_delta.y * 0.002).clamp(-1.2, 1.2);
 
-        let forward = egui::vec2(self.game.yaw.cos(), self.game.yaw.sin());
-        let right = egui::vec2(-forward.y, forward.x);
+        let forward = egui::vec2(self.game.yaw.sin(), self.game.yaw.cos());
+        let right = egui::vec2(self.game.yaw.cos(), -self.game.yaw.sin());
         let speed = 120.0;
         let delta_move = (forward * movement.y + right * movement.x) * speed * dt;
-        self.game.position += delta_move;
+        self.game.position[0] += delta_move.x;
+        self.game.position[2] += delta_move.y;
 
         self.game.velocity_y -= 9.8 * dt;
-        self.game.position.y += self.game.velocity_y;
-        if self.game.position.y <= 0.0 {
+        self.game.position[1] += self.game.velocity_y;
+        if self.game.position[1] <= 0.0 {
             self.game.grounded = true;
-            self.game.position.y = 0.0;
+            self.game.position[1] = 0.0;
             self.game.velocity_y = 0.0;
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Project Rec Game");
-            ui.label("Default fallback player: 2 cubes for hands and 1 rectangle for body.");
-            ui.label("Use WASD to move, SPACE to jump, mouse to look.");
+            ui.heading("Project Rec 3D World");
+            ui.label("Move with WASD, jump with SPACE, mouse to look around.");
             ui.separator();
             let available = ui.max_rect();
             let painter = ui.painter();
+            self.draw_world(painter, available.center(), available);
             let center = available.center();
-            let body = egui::Rect::from_center_size(center, egui::vec2(64.0, 120.0));
-            painter.rect_filled(body, 8.0, egui::Color32::from_rgb(100, 180, 240));
-            let left_hand = egui::Rect::from_center_size(center + egui::vec2(-40.0, 20.0), egui::vec2(24.0, 24.0));
-            let right_hand = egui::Rect::from_center_size(center + egui::vec2(40.0, 20.0), egui::vec2(24.0, 24.0));
-            painter.rect_filled(left_hand, 8.0, egui::Color32::from_rgb(180, 120, 100));
-            painter.rect_filled(right_hand, 8.0, egui::Color32::from_rgb(180, 120, 100));
             let crosshair_size = 12.0;
             painter.line_segment(
                 [center - egui::vec2(crosshair_size, 0.0), center + egui::vec2(crosshair_size, 0.0)],
@@ -290,11 +421,78 @@ impl ProjectRecApp {
                 (2.0, egui::Color32::WHITE),
             );
             ui.separator();
-            ui.label(format!("Position: {:.1}, {:.1}", self.game.position.x, self.game.position.y));
+            ui.label(format!("Camera pos: {:.1}, {:.1}, {:.1}", self.game.position[0], self.game.position[1], self.game.position[2]));
             ui.label(format!("View yaw: {:.2}, pitch: {:.2}", self.game.yaw, self.game.pitch));
-            if ui.button("Return to Menu").clicked() {
-                self.mode = AppMode::Menu;
+            ui.horizontal(|ui| {
+                if ui.button("Editor Mode").clicked() {
+                    self.mode = AppMode::Editor;
+                    self.status = "Editor started.".to_string();
+                }
+                if ui.button("Return to Menu").clicked() {
+                    self.mode = AppMode::Menu;
+                }
+            });
+        });
+    }
+
+    fn update_editor(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let _available = egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Project Rec Editor");
+            ui.label("Place and remove cubes in the 3D world.");
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut self.editor.cursor[0]).speed(1));
+                ui.label("X");
+                ui.add(egui::DragValue::new(&mut self.editor.cursor[1]).speed(1));
+                ui.label("Y");
+                ui.add(egui::DragValue::new(&mut self.editor.cursor[2]).speed(1));
+                ui.label("Z");
+            });
+            ui.add(egui::Slider::new(&mut self.editor.size, 0.5..=4.0).text("Size"));
+            if ui.button("Add Cube").clicked() {
+                self.world.push(Cube::new(
+                    [self.editor.cursor[0] as f32, self.editor.cursor[1] as f32, self.editor.cursor[2] as f32],
+                    self.editor.size,
+                    egui::Color32::from_rgb(160, 220, 160),
+                ));
+                self.editor.action_message = format!("Added cube at {} {} {}.", self.editor.cursor[0], self.editor.cursor[1], self.editor.cursor[2]);
             }
+            if ui.button("Remove Nearest Cube").clicked() {
+                if let Some(index) = self.world.iter().enumerate().min_by(|(_, a), (_, b)| {
+                    let da = (a.position[0] - self.editor.cursor[0] as f32).abs()
+                        + (a.position[1] - self.editor.cursor[1] as f32).abs()
+                        + (a.position[2] - self.editor.cursor[2] as f32).abs();
+                    let db = (b.position[0] - self.editor.cursor[0] as f32).abs()
+                        + (b.position[1] - self.editor.cursor[1] as f32).abs()
+                        + (b.position[2] - self.editor.cursor[2] as f32).abs();
+                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                }) {
+                    self.world.remove(index.0);
+                    self.editor.action_message = "Removed nearest cube.".to_string();
+                }
+            }
+            ui.label(&self.editor.action_message);
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button("Back to Game").clicked() {
+                    self.mode = AppMode::Game;
+                    self.status = "Returned to game.".to_string();
+                }
+                if ui.button("Back to Menu").clicked() {
+                    self.mode = AppMode::Menu;
+                }
+            });
+            ui.separator();
+            ui.label("World cubes:");
+            for cube in &self.world {
+                ui.label(format!("Cube at ({:.0}, {:.0}, {:.0}) size {:.1}", cube.position[0], cube.position[1], cube.position[2], cube.size));
+            }
+            ui.add_space(8.0);
+            ui.label("Scene preview:");
+            let preview_response = ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
+            let preview_rect = preview_response.rect;
+            let preview_painter = ui.painter_at(preview_rect);
+            self.draw_world(&preview_painter, preview_rect.center(), preview_rect);
         });
     }
 }
