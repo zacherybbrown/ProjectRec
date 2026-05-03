@@ -4,6 +4,9 @@ use crate::room::{load_registry, RoomInfo};
 use crate::server::RoomServer;
 use anyhow::Result;
 use eframe::{egui, NativeOptions};
+use serde::Serialize;
+use std::fs::File;
+use std::io::Write;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
@@ -64,6 +67,16 @@ struct SceneObject {
     color: egui::Color32,
 }
 
+#[derive(Serialize)]
+struct SceneSaveObject {
+    id: usize,
+    name: String,
+    position: [f32; 3],
+    rotation: [f32; 3],
+    size: f32,
+    color: [u8; 3],
+}
+
 impl SceneObject {
     fn new(id: usize, name: impl Into<String>, position: [f32; 3], size: f32, color: egui::Color32) -> Self {
         Self {
@@ -73,6 +86,17 @@ impl SceneObject {
             rotation: [0.0, 0.0, 0.0],
             size,
             color,
+        }
+    }
+
+    fn to_save(&self) -> SceneSaveObject {
+        SceneSaveObject {
+            id: self.id,
+            name: self.name.clone(),
+            position: self.position,
+            rotation: self.rotation,
+            size: self.size,
+            color: [self.color.r(), self.color.g(), self.color.b()],
         }
     }
 }
@@ -125,6 +149,7 @@ struct ProjectRecApp {
     editor: EditorState,
     world: Vec<SceneObject>,
     avatar: Avatar,
+    cursor_locked: bool,
     host_name: String,
     host_port: String,
     host_public: bool,
@@ -150,6 +175,7 @@ impl ProjectRecApp {
                 SceneObject::new(2, "Green Platform", [0.0, -1.0, 12.0], 8.0, egui::Color32::from_rgb(100, 180, 100)),
             ],
             avatar: Avatar::new([0.0, 0.0, 4.0]),
+            cursor_locked: false,
             host_name: String::from("Lounge"),
             host_port: String::from("4000"),
             host_public: true,
@@ -287,11 +313,13 @@ impl eframe::App for ProjectRecApp {
                     ui.separator();
                             if ui.button("Start Game").clicked() {
                         self.mode = AppMode::Game;
-                        self.status = "Game started. WASD move, SPACE jump, mouse look.".to_string();
+                        self.cursor_locked = true;
+                        self.status = "Game started. Press ESC to unlock cursor.".to_string();
                     }
                     if ui.button("Editor Mode").clicked() {
                         self.mode = AppMode::Editor;
-                        self.status = "Editor started. Place cubes into the world.".to_string();
+                        self.cursor_locked = true;
+                        self.status = "Editor started. Press ESC to unlock cursor.".to_string();
                     }
                     ui.separator();
                     ui.label("Status:");
@@ -309,7 +337,7 @@ impl eframe::App for ProjectRecApp {
 }
 
 impl ProjectRecApp {
-    fn project_point(&self, point: [f32; 3], center: egui::Pos2, scale: f32) -> Option<(egui::Pos2, f32, [f32; 3])> {
+    fn world_to_camera(&self, point: [f32; 3]) -> [f32; 3] {
         let dx = point[0] - self.game.position[0];
         let dy = point[1] - self.game.position[1];
         let dz = point[2] - self.game.position[2];
@@ -318,21 +346,24 @@ impl ProjectRecApp {
 
         let cos_y = yaw.cos();
         let sin_y = yaw.sin();
-        let x = dx * cos_y + dz * sin_y;
-        let z = -dx * sin_y + dz * cos_y;
+        let xz = [dx * cos_y + dz * sin_y, -dx * sin_y + dz * cos_y];
 
         let cos_p = pitch.cos();
         let sin_p = pitch.sin();
-        let y = dy * cos_p - z * sin_p;
-        let z = dy * sin_p + z * cos_p;
+        let x = xz[0];
+        let y = dy * cos_p - xz[1] * sin_p;
+        let z = dy * sin_p + xz[1] * cos_p;
+        [x, y, z]
+    }
 
-        if z <= 0.1 {
-            return None;
+    fn project_point(&self, point: [f32; 3], center: egui::Pos2, scale: f32) -> Option<(egui::Pos2, f32, [f32; 3])> {
+        let mut cam = self.world_to_camera(point);
+        if cam[2] <= 0.1 {
+            cam[2] = 0.1;
         }
-
-        let px = center.x + x / z * scale;
-        let py = center.y - y / z * scale;
-        Some((egui::pos2(px, py), z, [x, y, z]))
+        let px = center.x + cam[0] / cam[2] * scale;
+        let py = center.y - cam[1] / cam[2] * scale;
+        Some((egui::pos2(px, py), cam[2], cam))
     }
 
     fn draw_cube(&self, painter: &egui::Painter, cube: &SceneObject, center: egui::Pos2, scale: f32, selected: bool) {
@@ -348,61 +379,55 @@ impl ProjectRecApp {
             [cube.position[0] - half, cube.position[1] + half, cube.position[2] + half],
         ];
 
-        let projected: Vec<Option<(egui::Pos2, f32, [f32; 3])>> = corners
+        let projected: Vec<(egui::Pos2, f32, [f32; 3])> = corners
             .iter()
-            .map(|point| self.project_point(*point, center, scale))
+            .filter_map(|point| self.project_point(*point, center, scale))
             .collect();
-        if projected.iter().any(|entry| entry.is_none()) {
+        if projected.len() != corners.len() {
             return;
         }
 
-        let projected: Vec<(egui::Pos2, f32, [f32; 3])> = projected.into_iter().map(|entry| entry.unwrap()).collect();
         let pts: Vec<egui::Pos2> = projected.iter().map(|entry| entry.0).collect();
 
         let faces = [
-            ([0, 1, 2, 3], [0.0, 0.0, -1.0]),
-            ([4, 5, 6, 7], [0.0, 0.0, 1.0]),
-            ([0, 1, 5, 4], [0.0, -1.0, 0.0]),
-            ([2, 3, 7, 6], [0.0, 1.0, 0.0]),
-            ([1, 2, 6, 5], [1.0, 0.0, 0.0]),
-            ([0, 3, 7, 4], [-1.0, 0.0, 0.0]),
+            [0, 1, 2, 3],
+            [4, 5, 6, 7],
+            [0, 1, 5, 4],
+            [2, 3, 7, 6],
+            [1, 2, 6, 5],
+            [0, 3, 7, 4],
         ];
 
-        let mut face_data: Vec<(f32, Vec<egui::Pos2>, egui::Color32)> = Vec::new();
-        for (indices, _) in faces {
+        let mut face_data: Vec<(f32, Vec<egui::Pos2>)> = Vec::new();
+        for indices in faces {
             let poly: Vec<egui::Pos2> = indices.iter().map(|&i| pts[i]).collect();
-            let cam_p0 = projected[indices[0]].2;
-            let cam_p1 = projected[indices[1]].2;
-            let cam_p2 = projected[indices[2]].2;
-            let edge1 = [cam_p1[0] - cam_p0[0], cam_p1[1] - cam_p0[1], cam_p1[2] - cam_p0[2]];
-            let edge2 = [cam_p2[0] - cam_p0[0], cam_p2[1] - cam_p0[1], cam_p2[2] - cam_p0[2]];
-            let normal = [
-                edge1[1] * edge2[2] - edge1[2] * edge2[1],
-                edge1[2] * edge2[0] - edge1[0] * edge2[2],
-                edge1[0] * edge2[1] - edge1[1] * edge2[0],
-            ];
-            if normal[2] >= 0.0 {
-                continue;
-            }
-
             let depth = indices.iter().map(|&i| projected[i].1).sum::<f32>() / 4.0;
-            let brightness = 0.6 + 0.4 * (-normal[2].min(1.0));
-            let color = egui::Color32::from_rgb(
-                (cube.color.r() as f32 * brightness) as u8,
-                (cube.color.g() as f32 * brightness) as u8,
-                (cube.color.b() as f32 * brightness) as u8,
-            );
-            face_data.push((depth, poly, color));
+            face_data.push((depth, poly));
         }
 
         face_data.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        for (_, polygon, color) in face_data {
-            painter.add(egui::Shape::convex_polygon(polygon, color, egui::Stroke::new(1.5, egui::Color32::BLACK)));
+        for (_, polygon) in face_data {
+            painter.add(egui::Shape::convex_polygon(
+                polygon.clone(),
+                cube.color,
+                egui::Stroke::new(1.5, egui::Color32::BLACK),
+            ));
+        }
+
+        let edge_indices = [
+            (0, 1), (1, 2), (2, 3), (3, 0),
+            (4, 5), (5, 6), (6, 7), (7, 4),
+            (0, 4), (1, 5), (2, 6), (3, 7),
+        ];
+
+        for &(a, b) in &edge_indices {
+            painter.line_segment([pts[a], pts[b]], (2.0, egui::Color32::BLACK));
         }
 
         if selected {
-            let line = egui::Shape::line(pts, egui::Stroke::new(2.0, egui::Color32::WHITE));
-            painter.add(line);
+            for &(a, b) in &edge_indices {
+                painter.line_segment([pts[a], pts[b]], (2.0, egui::Color32::WHITE));
+            }
         }
     }
 
@@ -440,7 +465,7 @@ impl ProjectRecApp {
         }
     }
 
-    fn draw_world(&self, painter: &egui::Painter, center: egui::Pos2, rect: egui::Rect) {
+    fn draw_world(&self, painter: &egui::Painter, center: egui::Pos2, rect: egui::Rect, show_avatar: bool) {
         let ground_color = egui::Color32::from_rgb(40, 60, 80);
         let sky_color = egui::Color32::from_rgb(10, 25, 60);
         painter.rect_filled(rect, 0.0, sky_color);
@@ -467,13 +492,16 @@ impl ProjectRecApp {
             self.draw_cube(painter, object, center, 360.0, selected);
         }
 
-        self.draw_avatar(painter, center, 360.0);
+        if show_avatar {
+            self.draw_avatar(painter, center, 360.0);
+        }
     }
 
     fn update_game(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let dt = 1.0 / 60.0;
-        let (w_pressed, s_pressed, a_pressed, d_pressed, jump_pressed, pointer_delta) = ctx.input(|input| {
+        let (escape_pressed, w_pressed, s_pressed, a_pressed, d_pressed, jump_pressed, pointer_delta) = ctx.input(|input| {
             (
+                input.key_pressed(egui::Key::Escape),
                 input.key_down(egui::Key::W),
                 input.key_down(egui::Key::S),
                 input.key_down(egui::Key::A),
@@ -482,8 +510,16 @@ impl ProjectRecApp {
                 input.pointer.delta(),
             )
         });
-        let mut movement = egui::vec2(0.0, 0.0);
+        if escape_pressed {
+            self.cursor_locked = !self.cursor_locked;
+            if self.cursor_locked {
+                self.status = "Cursor locked. Move mouse to look.".to_string();
+            } else {
+                self.status = "Cursor unlocked. Press ESC again to lock.".to_string();
+            }
+        }
 
+        let mut movement = egui::vec2(0.0, 0.0);
         if w_pressed {
             movement.y -= 1.0;
         }
@@ -497,11 +533,13 @@ impl ProjectRecApp {
             movement.x += 1.0;
         }
         if jump_pressed && self.game.grounded {
-            self.game.velocity_y = 6.0;
+            self.game.velocity_y = 4.0;
             self.game.grounded = false;
         }
-        self.game.yaw += pointer_delta.x * 0.002;
-        self.game.pitch = (self.game.pitch + pointer_delta.y * 0.002).clamp(-1.2, 1.2);
+        if self.cursor_locked {
+            self.game.yaw += pointer_delta.x * 0.002;
+            self.game.pitch = (self.game.pitch + pointer_delta.y * 0.002).clamp(-1.2, 1.2);
+        }
 
         let forward = egui::vec2(self.game.yaw.sin(), self.game.yaw.cos());
         let right = egui::vec2(self.game.yaw.cos(), -self.game.yaw.sin());
@@ -518,13 +556,22 @@ impl ProjectRecApp {
             self.game.velocity_y = 0.0;
         }
 
+        self.avatar.position = [self.game.position[0], self.game.position[1] - 1.6, self.game.position[2]];
+        self.avatar.rotation_y = self.game.yaw.to_degrees();
+
+        if self.cursor_locked {
+            ctx.set_cursor_icon(egui::CursorIcon::None);
+        } else {
+            ctx.set_cursor_icon(egui::CursorIcon::Default);
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Project Rec 3D World");
             ui.label("Move with WASD, jump with SPACE, mouse to look around.");
             ui.separator();
             let available = ui.max_rect();
             let painter = ui.painter();
-            self.draw_world(painter, available.center(), available);
+            self.draw_world(painter, available.center(), available, false);
             let center = available.center();
             let crosshair_size = 12.0;
             painter.line_segment(
@@ -663,7 +710,43 @@ impl ProjectRecApp {
             let preview_response = ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::hover());
             let preview_rect = preview_response.rect;
             let preview_painter = ui.painter_at(preview_rect);
-            self.draw_world(&preview_painter, preview_rect.center(), preview_rect);
+            self.draw_world(&preview_painter, preview_rect.center(), preview_rect, false);
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button("Save Level").clicked() {
+                    let save_objects: Vec<SceneSaveObject> = self.world.iter().map(|obj| obj.to_save()).collect();
+                    let json = serde_json::to_string_pretty(&save_objects);
+                    match json {
+                        Ok(contents) => {
+                            let mut path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                            path.push("saved_level.json");
+                            match File::create(&path) {
+                                Ok(mut file) => {
+                                    if let Err(err) = file.write_all(contents.as_bytes()) {
+                                        self.editor.action_message = format!("Save failed: {}", err);
+                                    } else {
+                                        self.editor.action_message = format!("Saved level to {}", path.display());
+                                    }
+                                }
+                                Err(err) => {
+                                    self.editor.action_message = format!("Save failed: {}", err);
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            self.editor.action_message = format!("Save failed: {}", err);
+                        }
+                    }
+                }
+                if ui.button("Back to Game").clicked() {
+                    self.mode = AppMode::Game;
+                    self.cursor_locked = true;
+                    self.status = "Returned to game.".to_string();
+                }
+                if ui.button("Back to Menu").clicked() {
+                    self.mode = AppMode::Menu;
+                }
+            });
         });
     }
 }
