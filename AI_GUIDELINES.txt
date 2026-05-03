@@ -13,8 +13,4 @@ If needed, improve on the rules, but do not change the no ai change section.
 - [] Load assets from assets folder and use custom assets with the server and load them when loading.
 - [] add more ideas here. 
 
-
-
-
-
 ~END OF SECTION~
