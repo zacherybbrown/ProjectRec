@@ -25,8 +25,15 @@ Avatar and cosmetics:
 Technical direction:
 - Built in Rust.
 - Compiled to a native executable.
+- Supports PC and PCVR hosting modes.
 - Not built with a game engine.
 - Does not require administrator privileges to run server or client.
+
+Additional ideas:
+- Add a desktop GUI for room hosting, joining, and status display.
+- Support PC mode alongside PCVR for local room creation.
+- Add room themes and dynamic invitations.
+- Add local asset customization and room-specific cosmetics.
 
 Notes:
 - Follow the AI guidelines: no em dashes, no shortcuts, no wasted space.

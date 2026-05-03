@@ -67,6 +67,28 @@ pub async fn run_client(address: &str, avatar_name: &str) -> Result<()> {
     Ok(())
 }
 
+pub async fn run_gui_client(address: &str, avatar_name: &str) -> Result<String> {
+    let socket = TcpStream::connect(address)
+        .await
+        .with_context(|| format!("Failed to connect to room at {}", address))?;
+    let (reader, writer) = socket.into_split();
+    let mut reader = BufReader::new(reader);
+    let mut writer = BufWriter::new(writer);
+    let profile = AvatarProfile::base(avatar_name.to_string());
+    let join = ClientMessage::JoinRequest {
+        name: avatar_name.to_string(),
+        avatar: profile,
+    };
+    let payload = serde_json::to_string(&join)?;
+    writer.write_all(payload.as_bytes()).await?;
+    writer.write_all(b"\n").await?;
+    writer.flush().await?;
+
+    let mut line = String::new();
+    reader.read_line(&mut line).await?;
+    Ok(line)
+}
+
 fn parse_command(input: &str) -> Result<ClientMessage> {
     let parts: Vec<&str> = input.split_whitespace().collect();
     match parts.as_slice() {

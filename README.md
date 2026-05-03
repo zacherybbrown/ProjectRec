@@ -18,10 +18,16 @@ Build the project:
 cargo build --release
 ```
 
-Run a room host (PCVR required):
+Run a room host (PC mode or PCVR mode):
 
 ```bash
-cargo run -- host --room-name "Lounge" --pcvr
+cargo run -- host --room-name "Lounge" --pc
+```
+
+Run the GUI:
+
+```bash
+cargo run -- gui
 ```
 
 Join a room:

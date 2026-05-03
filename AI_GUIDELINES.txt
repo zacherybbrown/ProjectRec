@@ -14,6 +14,7 @@ If needed, improve on the rules, but do not change the no ai change section.
 - [x] idea is done.
 - [x] Load assets from assets folder and use custom assets with the server and load them when loading.
 - [x] make a build.bat and one single output folder.
-- [] add more ideas.
+- [x] add gui and pc support.
+- [x] add more ideas.
 
 ~END OF SECTION~
