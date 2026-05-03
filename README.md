@@ -18,13 +18,19 @@ Build the project:
 cargo build --release
 ```
 
+Run the default GUI:
+
+```bash
+cargo run
+```
+
 Run a room host (PC mode or PCVR mode):
 
 ```bash
 cargo run -- host --room-name "Lounge" --pc
 ```
 
-Run the GUI:
+Run the GUI explicitly:
 
 ```bash
 cargo run -- gui

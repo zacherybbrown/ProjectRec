@@ -18,7 +18,7 @@ use crate::server::RoomServer;
 #[command(author, version, about = "Project Rec is a social room transport experience in Rust.")]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -48,7 +48,7 @@ enum Commands {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    match cli.command {
+    match cli.command.unwrap_or(Commands::Gui {}) {
         Commands::Host { room_name, port, public, pc, pcvr } => {
             if !pc && !pcvr {
                 anyhow::bail!("Room creation requires --pc or --pcvr.");
@@ -67,7 +67,7 @@ fn main() -> Result<()> {
                 port,
                 public,
             };
-            let assets = AssetManager::load("assets").context("Failed to load assets")?;
+            let assets = AssetManager::load_or_fallback("assets").context("Failed to load assets or fallback")?;
             let server = RoomServer::new(room_info, assets);
             let runtime = tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
             runtime.block_on(server.run())?;
