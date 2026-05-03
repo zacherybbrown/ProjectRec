@@ -6,11 +6,14 @@ No wasting space.
 Ask questions a lot.
 If there is a placeholder, comment it out.
 If needed, improve on the rules, but do not change the no ai change section.
+- [x] = done
+- [] = not done
 ~END OF SECTION~
 
 ~AI CAN CHANGE~
 - [x] idea is done.
-- [] Load assets from assets folder and use custom assets with the server and load them when loading.
-- [] add more ideas here. 
+- [x] Load assets from assets folder and use custom assets with the server and load them when loading.
+- [x] make a build.bat and one single output folder.
+- [] add more ideas.
 
 ~END OF SECTION~

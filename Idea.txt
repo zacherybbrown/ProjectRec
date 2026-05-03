@@ -1,16 +1,37 @@
-Project Rec should be a experience and a game with seamless transitions between user created rooms.
-There will be a sky train that transitions the player and everyone inside to each room they want to go to.
-If a player wants to go to a different room than the one they chose, the old room will be removed.
-If a player wants to make a room, or go to a private room, they can call a private train.
-If a player wants to invite a friend, there will be a notification on their pop up screen.
-If the user accepts an invitation, a Sky train will pick them up and disable their movement and transport them.
-A player can always call a sky train to transition them to a different room. The sky train should not no-clip.
-If it is a public sky train, there will be a platform lifted down untull it reaches the floor of where the player is standing.
-If it is a private sky train, there will be a harness that will lift them into the train, and they can not move in the harness.
-Public sky trains should take each player to each destination and players choose which one to get off at.
-Each room is self hosted on the user's own Computer. If the room is connected, the room will be added to the list of rooms.
-If a user creates a room in game, and is on pcvr, then the user will make their own server. Else, they will be denied.
-Project rec will be a place where ther is a base avatar, but there can be costumes in rooms and cosmetics in the base game.
-Project Rec WILL be made with rust and will be built to an exe.
-Project Rec is NOT: built with a game engine, needs admin.
-In conclusion: Project rec is a social game made with rust and does not need admin to run server or client.
+Project Rec is a social experience game with seamless transitions between user-created rooms.
+
+Core concept:
+- Players connect to public or private rooms hosted on their own computers.
+- A sky train system moves players between rooms, with smooth boarding and transport.
+- Rooms appear in a room list only when they are connected and available.
+
+Sky train rules:
+- Players can call a sky train at any time to move to another room.
+- Public trains allow each player to choose which destination to exit at.
+- Private trains use a harness and lock player movement while boarding and transporting.
+- Public trains lower a platform down to the players floor level before boarding.
+- Trains must not no-clip through world geometry.
+
+Room creation and hosting:
+- If a user creates a room in-game while on PCVR, that user launches their own server.
+- If the user is not on PCVR, room creation is denied.
+- Each connected room is added to the available rooms list dynamically.
+
+Avatar and cosmetics:
+- Project Rec includes a base avatar.
+- Rooms may provide costumes.
+- Core game supports cosmetics in addition to room-specific outfits.
+
+Technical direction:
+- Built in Rust.
+- Compiled to a native executable.
+- Not built with a game engine.
+- Does not require administrator privileges to run server or client.
+
+Notes:
+- Follow the AI guidelines: no em dashes, no shortcuts, no wasted space.
+- TODO: load assets from an assets folder and support custom assets loaded at runtime.
+# Questions:
+# - How should room discovery work across LAN and internet?
+# - What network protocol will the Rust client/server use?
+# - Will the sky train system require physics or can it be fully scripted?

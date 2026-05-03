@@ -1,0 +1,26 @@
+{
+  "base_avatar": {
+    "name": "Traveler",
+    "description": "A simple base avatar used for Project Rec.",
+    "model": "base_avatar.obj"
+  },
+  "costumes": [
+    {
+      "name": "Sky Jacket",
+      "description": "A lightweight jacket for sky train travel.",
+      "model": "sky_jacket.obj"
+    },
+    {
+      "name": "Room Explorer",
+      "description": "A costume that appears in adventure rooms.",
+      "model": "room_explorer.obj"
+    }
+  ],
+  "cosmetics": [
+    {
+      "name": "Glow Trail",
+      "type": "particle",
+      "description": "A glowing trail effect while moving between rooms."
+    }
+  ]
+}
